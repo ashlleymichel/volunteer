@@ -1916,7 +1916,7 @@ function onTopbarSearch(q) {
   }
   if (upcomingSection) upcomingSection.style.display = 'none';
   resultWrap.style.display = '';
-  const found = events.filter(ev =>
+  const found = visibleEvents().filter(ev =>
     ev.name.toLowerCase().includes(q) ||
     (ev.leader||'').toLowerCase().includes(q) ||
     (ev.date ? fmt(ev.date).includes(q) : false)
@@ -1929,7 +1929,7 @@ function onTopbarSearch(q) {
   resultList.innerHTML = found.map(ev => {
     let day='—', mon='';
     if(ev.date){ const[,mo,dy]=ev.date.split('-'); day=dy.replace(/^0/,''); mon=MO[parseInt(mo,10)-1]||''; }
-    return `<div class="ev-row" onclick="openDrawer('${ev.id}')">
+    return `<div class="ev-row" onclick="openEventDetails('${ev.id}')">
       <div class="ev-date-block"><div class="ev-date-day">${day}</div>${mon?`<div class="ev-date-mon">${mon}</div>`:''}</div>
       <div class="ev-info"><div class="ev-name">${ev.name}</div><div class="ev-meta">${ev.leader||''}${ev.sessions?.[0]?.time?' · '+ev.sessions[0].time:''}</div></div>
       <span class="ev-chevron">›</span>
@@ -1958,7 +1958,7 @@ async function renderInicio() {
   const isEv  = document.getElementById('is-eventos');
   const isVol = document.getElementById('is-vols');
   const isLd  = document.getElementById('is-lideres');
-  if(isEv)  isEv.textContent  = events.length;
+  if(isEv)  isEv.textContent  = visibleEvents().length;
   if(isVol) isVol.textContent = members.length;
   // Conta líderes: role='lider' OU tem pelo menos uma área com role='lider' no profiles
   if(isLd) {
@@ -1978,7 +1978,7 @@ async function renderInicio() {
   const MONTHS = ['jan','fev','mar','abr','mai','jun','jul','ago','set','out','nov','dez'];
   const list = document.getElementById('inicio-ev-list');
   if(!list) return;
-  const upcoming = [...events]
+  const upcoming = visibleEvents()
     .sort((a,b)=>(a.date||'').localeCompare(b.date||''))
     .slice(0, 5);
   if(!upcoming.length) {
@@ -1988,9 +1988,9 @@ async function renderInicio() {
   list.innerHTML = upcoming.map(ev => {
     let day='—', mon='';
     if(ev.date){ const[,mo,dy]=ev.date.split('-'); day=dy.replace(/^0/,''); mon=MONTHS[parseInt(mo,10)-1]||''; }
-    return `<div class="ev-row" onclick="openDrawer('${ev.id}')">
+    return `<div class="ev-row" onclick="openEventDetails('${ev.id}')">
       <div class="ev-date-block"><div class="ev-date-day">${day}</div>${mon?`<div class="ev-date-mon">${mon}</div>`:''}</div>
-      <div class="ev-info"><div class="ev-name">${ev.name}</div><div class="ev-meta">${ev.leader}${ev.time?' · '+ev.time:''}</div></div>
+      <div class="ev-info"><div class="ev-name">${escapeHtml(ev.name)}</div><div class="ev-meta">${escapeHtml(ev.leader)}${ev.time?' · '+ev.time:''}</div></div>
       <span class="ev-chevron">›</span>
     </div>`;
   }).join('');
@@ -2099,7 +2099,7 @@ function renderEvents() {
 
   // Label da seção
   const label = document.getElementById('ev-section-label');
-  if (label) label.textContent = (evSearchQuery || evAreaFilter) ? 'Resultados' : 'Próximos eventos';
+  if (label) label.textContent = (evSearchQuery || evAreaFilter) ? 'Resultados' : `Eventos de ${CAL_MONTHS[new Date().getMonth()]}`;
 
   const filtered = filterEvents();
 
@@ -2364,9 +2364,10 @@ function isGoogleEvent(ev) {
 function visibleEvents() {
   const today = new Date();
   const todayStr = `${today.getFullYear()}-${String(today.getMonth()+1).padStart(2,'0')}-${String(today.getDate()).padStart(2,'0')}`;
-  const upcomingGoogleEvents = googleEvents.filter(ev => ev.date >= todayStr);
+  const monthPrefix = todayStr.slice(0, 7);
+  const upcomingGoogleEvents = googleEvents.filter(ev => ev.date >= todayStr && ev.date.startsWith(monthPrefix));
   const syncedGoogleIds = new Set(upcomingGoogleEvents.map(ev => ev.id));
-  const regularEvents = events.filter(ev => !isGoogleEvent(ev));
+  const regularEvents = events.filter(ev => !isGoogleEvent(ev) && ev.date >= todayStr && ev.date.startsWith(monthPrefix));
   const syncedGoogleEvents = upcomingGoogleEvents.map(googleEvent => {
     const saved = events.find(ev => ev.id === googleEvent.id);
     return saved
@@ -2825,6 +2826,9 @@ async function loadGoogleCalendarEvents(force = false) {
     }
     if (document.getElementById('view-eventos')?.classList.contains('active')) {
       renderEvents();
+    }
+    if (document.getElementById('view-inicio')?.classList.contains('active')) {
+      renderInicio();
     }
   } catch (error) {
     googleCalendarError = true;
@@ -3487,6 +3491,15 @@ async function delEvent(id){
   toast('Excluído');
   try { await dbDeleteEvent(id); } catch(e){}
 }
+
+let eventListDateKey = new Date().toDateString();
+setInterval(() => {
+  const currentDateKey = new Date().toDateString();
+  if (currentDateKey === eventListDateKey) return;
+  eventListDateKey = currentDateKey;
+  renderEvents();
+  renderInicio();
+}, 60 * 1000);
 
 initApp();
 </script>
