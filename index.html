@@ -1839,17 +1839,19 @@ async function saveProfile() {
     if(currentUser) {
       await dbSaveProfile(currentUser.id, profile);
       // Atualiza também o membro correspondente
-      const me = getSelfMember();
-      if (me) {
-        me.name  = name;
-        me.email = email;
-        me.phone = whatsapp;
-        me.areas = Object.keys(areaRoles);
-        me.areaRoles = { ...areaRoles };
-        me.role = Object.values(areaRoles).includes('lider') ? 'lider' : 'voluntario';
-        saveData();
-        await dbSaveMember(me);
+      let me = getSelfMember();
+      if (!me) {
+        me = { id: currentUser.id };
+        members.push(me);
       }
+      me.name  = name;
+      me.email = email;
+      me.phone = whatsapp;
+      me.areas = Object.keys(areaRoles);
+      me.areaRoles = { ...areaRoles };
+      me.role = Object.values(areaRoles).includes('lider') ? 'lider' : 'voluntario';
+      saveData();
+      await dbSaveMember(me);
     }
   } catch(e) { console.error('Erro ao salvar perfil:', e); }
 }
