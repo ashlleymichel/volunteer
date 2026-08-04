@@ -1813,6 +1813,7 @@ const AREAS = [
 ];
 
 let events  = [];
+let googleEvents = [];
 let members = [];
 let profile = null; // sempre carregado do Supabase ao fazer login
 let editId = null, drawerId = null;
@@ -1864,6 +1865,9 @@ const memberRoleForArea = (m, areaKey) => m.areaRoles?.[areaKey] || m.area_roles
 const AL    = k => members.find(m=>(Array.isArray(m.areas)?m.areas:m.area?[m.area]:[]).includes(k)&&memberRoleForArea(m,k)==='lider');
 const MONTHS= ['jan','fev','mar','abr','mai','jun','jul','ago','set','out','nov','dez'];
 const fmt   = d => { if(!d)return'—'; const[y,mo,dy]=d.split('-'); return`${dy}/${mo}/${y}`; };
+const escapeHtml = value => String(value ?? '').replace(/[&<>'"]/g, char => ({
+  '&':'&amp;','<':'&lt;','>':'&gt;',"'":'&#39;','"':'&quot;'
+})[char]);
 
 function stats() {
   const se=document.getElementById('s-ev');
@@ -2749,6 +2753,28 @@ function refreshGoogleCalendar() {
   if (!frame) return;
   const baseSrc = frame.dataset.calendarSrc;
   frame.src = `${baseSrc}&_refresh=${Date.now()}`;
+  loadGoogleCalendarEvents(true);
+}
+
+async function loadGoogleCalendarEvents(force = false) {
+  try {
+    const response = await fetch('/api/google-calendar', {
+      cache: force ? 'no-store' : 'default'
+    });
+    if (!response.ok) throw new Error(`HTTP ${response.status}`);
+    const data = await response.json();
+    googleEvents = Array.isArray(data.events) ? data.events : [];
+    if (document.getElementById('view-calendario')?.classList.contains('active')) {
+      renderCalendar();
+    }
+  } catch (error) {
+    console.error('Erro ao sincronizar Google Calendar:', error);
+    toast('Não foi possível atualizar a agenda da Paz Barueri');
+  }
+}
+
+function calendarEvents() {
+  return [...events, ...googleEvents];
 }
 
 function startGoogleCalendarRefresh() {
@@ -2787,7 +2813,7 @@ function renderCalendar() {
   const daysInMonth= new Date(calYear, calMonth+1, 0).getDate();
   const daysInPrev = new Date(calYear, calMonth, 0).getDate();
   const evMap = {};
-  events.forEach(ev => { if(ev.date){ if(!evMap[ev.date]) evMap[ev.date]=[]; evMap[ev.date].push(ev); }});
+  calendarEvents().forEach(ev => { if(ev.date){ if(!evMap[ev.date]) evMap[ev.date]=[]; evMap[ev.date].push(ev); }});
   let cells = '';
   for(let i=firstDay-1; i>=0; i--)
     cells += `<div class="cal-day other-month"><div class="cal-day-num">${daysInPrev-i}</div></div>`;
@@ -2796,7 +2822,7 @@ function renderCalendar() {
     const isToday = dateStr===todayStr;
     const isSel   = dateStr===calSelectedDate;
     const dayEvs  = evMap[dateStr]||[];
-    const dots = dayEvs.slice(0,2).map(ev=>`<span class="cal-ev-dot">${ev.name}</span>`).join('')
+    const dots = dayEvs.slice(0,2).map(ev=>`<span class="cal-ev-dot">${escapeHtml(ev.name)}</span>`).join('')
                + (dayEvs.length>2 ? `<span class="cal-ev-dot has-more">+${dayEvs.length-2} mais</span>` : '');
     cells += `<div class="cal-day${isToday?' today':''}${isSel?' cal-sel':''}" style="${isSel?'background:var(--accent-light);':''}" onclick="calSelectDay('${dateStr}')"><div class="cal-day-num">${d}</div>${dots}</div>`;
   }
@@ -2821,12 +2847,12 @@ function renderDayPanel(dateStr) {
   const [y,mo,d] = dateStr.split('-');
   const dayName = CAL_WD[new Date(+y, +mo-1, +d).getDay()];
   document.getElementById('cal-panel-title').textContent = `${dayName}, ${+d} de ${CAL_MONTHS[+mo-1]}`;
-  const dayEvs = events.filter(ev => ev.date===dateStr);
+  const dayEvs = calendarEvents().filter(ev => ev.date===dateStr);
   document.getElementById('cal-panel-list').innerHTML = dayEvs.length
-    ? dayEvs.map(ev => `<div class="ev-row" onclick="openDrawer('${ev.id}')">
+    ? dayEvs.map(ev => `<div class="ev-row" ${ev.source==='google'?'':`onclick="openDrawer('${ev.id}')"`}>
         <div class="ev-date-block" style="width:36px;height:40px"><div class="ev-date-day" style="font-size:18px">${+d}</div></div>
-        <div class="ev-info"><div class="ev-name">${ev.name}</div><div class="ev-meta">${ev.leader}${ev.time?' · '+ev.time:''}</div></div>
-        <span class="ev-chevron">›</span>
+        <div class="ev-info"><div class="ev-name">${escapeHtml(ev.name)}</div><div class="ev-meta">${ev.time||'Dia inteiro'}${ev.location?' · '+escapeHtml(ev.location):''}${ev.source==='google'?' · Google Calendar':''}</div></div>
+        ${ev.source==='google'?'<span style="font-size:16px">📅</span>':'<span class="ev-chevron">›</span>'}
       </div>`).join('')
     : `<div class="empty-msg" style="padding:20px 16px"><div class="empty-icon" style="font-size:26px">📭</div>Nenhum evento neste dia</div>`;
 }
@@ -2835,7 +2861,7 @@ function renderMonthEvents() {
   const label = document.getElementById('cal-month-events-label');
   const container = document.getElementById('cal-month-events');
   const prefix = `${calYear}-${String(calMonth+1).padStart(2,'0')}`;
-  const monthEvs = events
+  const monthEvs = calendarEvents()
     .filter(ev => ev.date && ev.date.startsWith(prefix))
     .sort((a,b) => a.date.localeCompare(b.date));
 
@@ -2850,18 +2876,18 @@ function renderMonthEvents() {
     const [,mo,d] = ev.date.split('-');
     const dayNum = parseInt(d);
     const dayName = CAL_WD[new Date(calYear, calMonth, dayNum).getDay()];
-    return `<div class="ev-row" onclick="openDrawer('${ev.id}')">
+    return `<div class="ev-row" ${ev.source==='google'?'':`onclick="openDrawer('${ev.id}')"`}>
       <div class="ev-date-block">
         <div class="ev-date-day">${dayNum}</div>
         <div class="ev-date-mon">${CAL_MONTHS[parseInt(mo)-1].slice(0,3).toLowerCase()}</div>
       </div>
       <div class="ev-info">
-        <div class="ev-name">${ev.name}</div>
-        <div class="ev-meta">${dayName}${ev.time ? ' · ' + ev.time : ''} · ${ev.leader}</div>
+        <div class="ev-name">${escapeHtml(ev.name)}</div>
+        <div class="ev-meta">${dayName}${ev.time ? ' · ' + ev.time : ''}${ev.location ? ' · ' + escapeHtml(ev.location) : ''}${ev.source==='google' ? ' · Google Calendar' : ' · ' + escapeHtml(ev.leader)}</div>
       </div>
       <div class="ev-right">
-        <div class="ev-areas-dots">${ev.areas.map(k=>`<span style="width:7px;height:7px;border-radius:50%;background:${A(k)?.color};display:inline-block"></span>`).join('')}</div>
-        <span class="ev-chevron">›</span>
+        <div class="ev-areas-dots">${(ev.areas||[]).map(k=>`<span style="width:7px;height:7px;border-radius:50%;background:${A(k)?.color};display:inline-block"></span>`).join('')}</div>
+        ${ev.source==='google'?'<span style="font-size:16px">📅</span>':'<span class="ev-chevron">›</span>'}
       </div>
     </div>`;
   }).join('');
