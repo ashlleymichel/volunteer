@@ -1883,6 +1883,7 @@ function setTab(tab, el) {
   if(tab==='inicio') renderInicio();
   if(tab==='areas')       renderAreas();
   if(tab==='voluntarios') renderVols();
+  if(['inicio','areas','voluntarios'].includes(tab)) refreshMembersFromDb();
   if(tab==='eventos') {
     renderEvents();
     if (!googleCalendarLoaded) loadGoogleCalendarEvents();
@@ -1954,25 +1955,15 @@ async function renderInicio() {
     igRole.style.color      = leader ? 'var(--c-luz)' : 'var(--accent)';
   }
 
-  // Stats — contagem de líderes vem direto do Supabase (profiles)
+  // Stats — a lista compartilhada de membros é visível para todos os autenticados.
   const isEv  = document.getElementById('is-eventos');
   const isVol = document.getElementById('is-vols');
   const isLd  = document.getElementById('is-lideres');
   if(isEv)  isEv.textContent  = visibleEvents().length;
   if(isVol) isVol.textContent = members.length;
-  // Conta líderes: role='lider' OU tem pelo menos uma área com role='lider' no profiles
-  if(isLd) {
-    try {
-      const { data: profs } = await sb.from('profiles').select('role, area_roles');
-      const liderCount = (profs||[]).filter(p =>
-        p.role === 'lider' ||
-        Object.values(p.area_roles || {}).some(r => r === 'lider')
-      ).length;
-      isLd.textContent = liderCount;
-    } catch(e) {
-      isLd.textContent = members.filter(m => m.role === 'lider').length;
-    }
-  }
+  if(isLd) isLd.textContent = members.filter(m =>
+    m.role === 'lider' || Object.values(m.areaRoles || {}).includes('lider')
+  ).length;
 
   // Next events (sorted, max 5)
   const MONTHS = ['jan','fev','mar','abr','mai','jun','jul','ago','set','out','nov','dez'];
@@ -3252,6 +3243,34 @@ async function logout() {
 }
 
 /* ── SUPABASE DATA LAYER ── */
+function mapMemberRow(row) {
+  return {
+    ...row,
+    areas: row.areas || [],
+    areaRoles: row.area_roles || Object.fromEntries((row.areas || []).map(k => [k, row.role || 'voluntario']))
+  };
+}
+
+let memberRefreshInProgress = false;
+async function refreshMembersFromDb() {
+  if (!currentUser || memberRefreshInProgress) return;
+  memberRefreshInProgress = true;
+  try {
+    const { data, error } = await withJwtClockRetry(() =>
+      sb.from('members').select('*').order('name')
+    );
+    if (error) throw error;
+    members = (data || []).map(mapMemberRow);
+    if (document.getElementById('view-inicio')?.classList.contains('active')) renderInicio();
+    if (document.getElementById('view-areas')?.classList.contains('active')) renderAreas();
+    if (document.getElementById('view-voluntarios')?.classList.contains('active')) renderVols();
+  } catch (error) {
+    console.error('Erro ao atualizar membros:', error);
+  } finally {
+    memberRefreshInProgress = false;
+  }
+}
+
 async function dbLoadAll() {
   const [evRes, memRes] = await Promise.all([
     withJwtClockRetry(() => sb.from('events').select('*').order('date')),
@@ -3260,11 +3279,7 @@ async function dbLoadAll() {
   if(evRes.error)  { console.error('Erro eventos:', evRes.error);  throw evRes.error; }
   if(memRes.error) { console.error('Erro members:', memRes.error); throw memRes.error; }
   events  = (evRes.data  || []).map(r => ({ ...r, areas: r.areas||[], sessions: r.sessions||[] }));
-  members = (memRes.data || []).map(r => ({
-    ...r,
-    areas: r.areas || [],
-    areaRoles: r.area_roles || Object.fromEntries((r.areas || []).map(k => [k, r.role || 'voluntario']))
-  }));
+  members = (memRes.data || []).map(mapMemberRow);
 }
 
 async function dbSaveEvent(ev) {
@@ -3500,6 +3515,9 @@ setInterval(() => {
   renderEvents();
   renderInicio();
 }, 60 * 1000);
+
+// Mantém contagens e listas de pessoas atualizadas entre usuários conectados.
+setInterval(() => refreshMembersFromDb(), 30 * 1000);
 
 initApp();
 </script>
