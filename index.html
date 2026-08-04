@@ -893,6 +893,31 @@
     display: flex; align-items: center; justify-content: space-between;
   }
 
+  .google-calendar-card {
+    background: var(--surface);
+    border: 1px solid var(--sep);
+    border-radius: var(--radius-lg);
+    overflow: hidden;
+    margin-bottom: 28px;
+  }
+  .google-calendar-head {
+    display: flex; align-items: center; justify-content: space-between; gap: 12px;
+    padding: 13px 16px; border-bottom: 1px solid var(--sep);
+  }
+  .google-calendar-title { font-size: 15px; font-weight: 600; }
+  .google-calendar-link {
+    color: var(--accent); font-size: 13px; font-weight: 500;
+    text-decoration: none; white-space: nowrap;
+  }
+  .google-calendar-frame {
+    display: block; width: 100%; height: 620px; border: 0;
+    background: #fff;
+  }
+  @media (max-width: 700px) {
+    .google-calendar-frame { height: 560px; }
+    .google-calendar-head { align-items: flex-start; }
+  }
+
   /* ── BOTTOM NAV ── */
   .bottom-nav { display: none; }
 
@@ -1463,6 +1488,22 @@
     </div>
 
     <div class="view" id="view-calendario">
+      <div class="section-title">Agenda Paz Barueri</div>
+      <div class="google-calendar-card">
+        <div class="google-calendar-head">
+          <div class="google-calendar-title">Google Calendar</div>
+          <a class="google-calendar-link" href="https://calendar.google.com/calendar/u/0/embed?src=pazbarueri@gmail.com&amp;ctz=America/Sao_Paulo" target="_blank" rel="noopener noreferrer">Abrir no Google ↗</a>
+        </div>
+        <iframe
+          class="google-calendar-frame"
+          title="Agenda Paz Barueri"
+          src="https://calendar.google.com/calendar/embed?src=pazbarueri%40gmail.com&amp;ctz=America%2FSao_Paulo&amp;hl=pt_BR"
+          loading="lazy"
+          referrerpolicy="no-referrer-when-downgrade">
+        </iframe>
+      </div>
+
+      <div class="section-title">Escalas do Volunteer</div>
       <div class="cal-header">
         <div class="cal-month-label" id="cal-month-label">—</div>
         <div class="cal-nav">
