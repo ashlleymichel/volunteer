@@ -2974,6 +2974,22 @@ function showAuthSuccess(msg) {
   el.classList.add('show', 'success');
 }
 
+const wait = ms => new Promise(resolve => setTimeout(resolve, ms));
+
+function isJwtClockError(error) {
+  return String(error?.message || error || '').toLowerCase().includes('jwt issued at future');
+}
+
+async function withJwtClockRetry(operation, maxAttempts = 4) {
+  let result;
+  for (let attempt = 0; attempt < maxAttempts; attempt++) {
+    result = await operation();
+    if (!result?.error || !isJwtClockError(result.error)) return result;
+    if (attempt < maxAttempts - 1) await wait(1000 * (attempt + 1));
+  }
+  return result;
+}
+
 async function doLogin() {
   const email    = document.getElementById('auth-email').value.trim();
   const password = document.getElementById('auth-password').value;
@@ -3033,15 +3049,19 @@ async function doSignup() {
     _pendingSignupData = { userId, name, email, whatsapp, role, areaRoles, areas };
 
     // 2. Salvar perfil na tabela profiles
-    const { error: profileError } = await sb.from('profiles').upsert({
-      user_id: userId, name, email, whatsapp, role, area_roles: areaRoles
-    }, { onConflict: 'user_id' });
+    const { error: profileError } = await withJwtClockRetry(() =>
+      sb.from('profiles').upsert({
+        user_id: userId, name, email, whatsapp, role, area_roles: areaRoles
+      }, { onConflict: 'user_id' })
+    );
     if (profileError) throw profileError;
 
     // 3. Salvar membro na tabela members
-    const { error: memberError } = await sb.from('members').upsert(
-      { id: userId, name, email, phone: whatsapp, areas, role },
-      { onConflict: 'id' }
+    const { error: memberError } = await withJwtClockRetry(() =>
+      sb.from('members').upsert(
+        { id: userId, name, email, phone: whatsapp, areas, role },
+        { onConflict: 'id' }
+      )
     );
     if (memberError) throw memberError;
 
@@ -3188,8 +3208,8 @@ async function logout() {
 /* ── SUPABASE DATA LAYER ── */
 async function dbLoadAll() {
   const [evRes, memRes] = await Promise.all([
-    sb.from('events').select('*').order('date'),
-    sb.from('members').select('*').order('name'),
+    withJwtClockRetry(() => sb.from('events').select('*').order('date')),
+    withJwtClockRetry(() => sb.from('members').select('*').order('name')),
   ]);
   if(evRes.error)  { console.error('Erro eventos:', evRes.error);  throw evRes.error; }
   if(memRes.error) { console.error('Erro members:', memRes.error); throw memRes.error; }
@@ -3232,7 +3252,9 @@ async function dbSaveProfile(userId, prof) {
 }
 
 async function dbLoadProfile(userId) {
-  const { data, error } = await sb.from('profiles').select('*').eq('user_id', userId).single();
+  const { data, error } = await withJwtClockRetry(() =>
+    sb.from('profiles').select('*').eq('user_id', userId).single()
+  );
   if (error && error.code !== 'PGRST116') console.error('Erro dbLoadProfile:', error);
   return data;
 }
@@ -3312,16 +3334,20 @@ async function enterApp(supaUser) {
           role: metaRole,
           area_roles: areaRoles
         };
-        const { error: profileError } = await sb.from('profiles').upsert(newProfile, { onConflict: 'user_id' });
+        const { error: profileError } = await withJwtClockRetry(() =>
+          sb.from('profiles').upsert(newProfile, { onConflict: 'user_id' })
+        );
         if (profileError) throw profileError;
-        const { error: memberError } = await sb.from('members').upsert({
-          id: supaUser.id,
-          name: newProfile.name,
-          email: newProfile.email,
-          phone: newProfile.whatsapp,
-          areas: metaAreas,
-          role: metaRole
-        }, { onConflict: 'id' });
+        const { error: memberError } = await withJwtClockRetry(() =>
+          sb.from('members').upsert({
+            id: supaUser.id,
+            name: newProfile.name,
+            email: newProfile.email,
+            phone: newProfile.whatsapp,
+            areas: metaAreas,
+            role: metaRole
+          }, { onConflict: 'id' })
+        );
         if (memberError) throw memberError;
         currentUser = {
           id: supaUser.id, email: newProfile.email, name: newProfile.name,
