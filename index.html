@@ -2434,7 +2434,7 @@ function openEvVolModal(sessionId, areaKey) {
   });
   const sel = document.getElementById('evm-member');
   sel.innerHTML = eligible.length
-    ? '<option value="">Selecione</option>' + eligible.map(m => `<option value="${m.id}">${m.name}${m.role==='lider'?' (Líder)':''}</option>`).join('')
+    ? '<option value="">Selecione</option>' + eligible.map(m => `<option value="${m.id}">${escapeHtml(m.name)}${memberRoleForArea(m, areaKey)==='lider'?' (Líder)':''}</option>`).join('')
     : '<option value="">Nenhum disponível nesta área</option>';
   document.getElementById('ev-vol-modal').classList.add('open');
 }
@@ -2475,7 +2475,7 @@ async function removeEvVol(sessionId, areaKey, memberId) {
 function renderAreas(){
   document.getElementById('ar-body').innerHTML=AREAS.map(a=>{
     const am=members.filter(m=>(Array.isArray(m.areas)?m.areas:m.area?[m.area]:[]).includes(a.key));
-    const ldr=am.find(m=>memberRoleForArea(m,a.key)==='lider');
+    const leaders=am.filter(m=>memberRoleForArea(m,a.key)==='lider');
     const vols=am.filter(m=>memberRoleForArea(m,a.key)!=='lider');
     const aColor=a.color.replace('var(--','').replace(')','');
     return`<div>
@@ -2489,18 +2489,18 @@ function renderAreas(){
       </div>
       <div class="area-body" id="ab-${a.key}">
         <div class="area-body-inner">
-          ${ldr?`<div class="mem-row">
+          ${leaders.length ? leaders.map(ldr => `<div class="mem-row">
             <div class="mem-left">
-              <div class="mem-init" style="background:${a.color}20;color:${a.color}">${ldr.name[0]}</div>
-              <div><div class="mem-name">${ldr.name}</div>${ldr.email?`<div class="mem-email">${ldr.email}</div>`:''}</div>
+              <div class="mem-init" style="background:${a.color}20;color:${a.color}">${escapeHtml(ldr.name?.[0] || '?')}</div>
+              <div><div class="mem-name">${escapeHtml(ldr.name)}</div>${ldr.email?`<div class="mem-email">${escapeHtml(ldr.email)}</div>`:''}</div>
               <span class="role-pill">Líder</span>
             </div>
             ${isLeader() ? `<button class="btn-link" onclick="openEditMem('${ldr.id}')">Editar</button>` : ''}
-          </div>`:`<div class="mem-row" style="color:var(--muted);font-size:13px">Nenhum líder</div>`}
+          </div>`).join('') : `<div class="mem-row" style="color:var(--muted);font-size:13px">Nenhum líder</div>`}
           ${vols.map(v=>`<div class="mem-row">
             <div class="mem-left">
-              <div class="mem-init" style="background:${a.color}15;color:${a.color}">${v.name[0]}</div>
-              <div><div class="mem-name">${v.name}</div>${v.email?`<div class="mem-email">${v.email}</div>`:''}</div>
+              <div class="mem-init" style="background:${a.color}15;color:${a.color}">${escapeHtml(v.name?.[0] || '?')}</div>
+              <div><div class="mem-name">${escapeHtml(v.name)}</div>${v.email?`<div class="mem-email">${escapeHtml(v.email)}</div>`:''}</div>
             </div>
             ${isLeader() ? `<button class="btn-link" onclick="openEditMem('${v.id}')">Editar</button>` : ''}
           </div>`).join('')}
@@ -2565,26 +2565,26 @@ function expandMinistry(areaKey) {
     const mA = Array.isArray(m.areas) ? m.areas : m.area ? [m.area] : [];
     return mA.includes(areaKey);
   });
-  const leader = aMembers.find(m => memberRoleForArea(m, areaKey) === 'lider');
+  const leaders = aMembers.filter(m => memberRoleForArea(m, areaKey) === 'lider');
   const vols   = aMembers.filter(m => memberRoleForArea(m, areaKey) !== 'lider');
 
   let html = '';
-  if (leader) {
+  if (leaders.length) {
     html += `<div class="mc-role-label">Líder</div>
-    <div class="mc-member-row">
-      <div class="mc-avatar" style="background:${a.color}20;color:${a.color}">${leader.name[0]}</div>
+    ${leaders.map(leader => `<div class="mc-member-row">
+      <div class="mc-avatar" style="background:${a.color}20;color:${a.color}">${escapeHtml(leader.name?.[0] || '?')}</div>
       <div class="mc-member-info">
-        <div class="mc-member-name">${leader.name}</div>
-        ${leader.email||leader.phone ? `<div class="mc-member-sub">${[leader.email,leader.phone].filter(Boolean).join(' · ')}</div>` : ''}
+        <div class="mc-member-name">${escapeHtml(leader.name)}</div>
+        ${leader.email||leader.phone ? `<div class="mc-member-sub">${[leader.email,leader.phone].filter(Boolean).map(escapeHtml).join(' · ')}</div>` : ''}
       </div>
       <div class="mc-member-actions">
         ${isLeader() ? `<button class="btn btn-ghost btn-sm" onclick="openEditMem('${leader.id}')">Editar</button>
         <button class="btn btn-danger btn-sm" onclick="rmMem('${leader.id}')">Excluir</button>` : ''}
       </div>
-    </div>`;
+    </div>`).join('')}`;
   }
   if (vols.length) {
-    html += `<div class="mc-role-label" style="margin-top:${leader?'10px':'0'}">Voluntários</div>`;
+    html += `<div class="mc-role-label" style="margin-top:${leaders.length?'10px':'0'}">Voluntários</div>`;
     html += vols.map(m => `
     <div class="mc-member-row">
       <div class="mc-avatar" style="background:${a.color}10;color:${a.color}">${m.name[0]}</div>
