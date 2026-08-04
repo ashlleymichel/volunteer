@@ -1495,9 +1495,11 @@
           <a class="google-calendar-link" href="https://calendar.google.com/calendar/u/0/embed?src=pazbarueri@gmail.com&amp;ctz=America/Sao_Paulo" target="_blank" rel="noopener noreferrer">Abrir no Google ↗</a>
         </div>
         <iframe
+          id="google-calendar-frame"
           class="google-calendar-frame"
           title="Agenda Paz Barueri"
           src="https://calendar.google.com/calendar/embed?src=pazbarueri%40gmail.com&amp;ctz=America%2FSao_Paulo&amp;hl=pt_BR"
+          data-calendar-src="https://calendar.google.com/calendar/embed?src=pazbarueri%40gmail.com&amp;ctz=America%2FSao_Paulo&amp;hl=pt_BR"
           loading="lazy"
           referrerpolicy="no-referrer-when-downgrade">
         </iframe>
@@ -1888,7 +1890,13 @@ function setTab(tab, el) {
   if(tab==='areas')       renderAreas();
   if(tab==='voluntarios') renderVols();
   if(tab==='perfil')      renderProfileView();
-  if(tab==='calendario')  renderCalendar();
+  if(tab==='calendario') {
+    renderCalendar();
+    refreshGoogleCalendar();
+    startGoogleCalendarRefresh();
+  } else {
+    stopGoogleCalendarRefresh();
+  }
   syncBottomNav('bn-'+tab);
 }
 function setTabByName(tab) {
@@ -2726,6 +2734,30 @@ function updateSidebarProfile(){
 /* ── CALENDAR ── */
 const CAL_MONTHS = ['Janeiro','Fevereiro','Março','Abril','Maio','Junho','Julho','Agosto','Setembro','Outubro','Novembro','Dezembro'];
 const CAL_WD     = ['Dom','Seg','Ter','Qua','Qui','Sex','Sáb'];
+
+let googleCalendarRefreshTimer = null;
+
+function refreshGoogleCalendar() {
+  const frame = document.getElementById('google-calendar-frame');
+  if (!frame) return;
+  const baseSrc = frame.dataset.calendarSrc;
+  frame.src = `${baseSrc}&_refresh=${Date.now()}`;
+}
+
+function startGoogleCalendarRefresh() {
+  stopGoogleCalendarRefresh();
+  googleCalendarRefreshTimer = setInterval(() => {
+    if (document.getElementById('view-calendario')?.classList.contains('active')) {
+      refreshGoogleCalendar();
+    }
+  }, 5 * 60 * 1000);
+}
+
+function stopGoogleCalendarRefresh() {
+  if (!googleCalendarRefreshTimer) return;
+  clearInterval(googleCalendarRefreshTimer);
+  googleCalendarRefreshTimer = null;
+}
 
 let calYear  = new Date().getFullYear();
 let calMonth = new Date().getMonth();
