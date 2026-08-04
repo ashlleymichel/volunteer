@@ -1844,6 +1844,9 @@ async function saveProfile() {
         me.name  = name;
         me.email = email;
         me.phone = whatsapp;
+        me.areas = Object.keys(areaRoles);
+        me.areaRoles = { ...areaRoles };
+        me.role = Object.values(areaRoles).includes('lider') ? 'lider' : 'voluntario';
         saveData();
         await dbSaveMember(me);
       }
@@ -1855,7 +1858,8 @@ const uid   = () => Date.now().toString(36)+Math.random().toString(36).slice(2);
 const stopEv= e => e.stopPropagation();
 const A     = k => AREAS.find(a=>a.key===k);
 const AM    = k => members.filter(m=>(Array.isArray(m.areas)?m.areas:m.area?[m.area]:[]).includes(k));
-const AL    = k => members.find(m=>(Array.isArray(m.areas)?m.areas:m.area?[m.area]:[]).includes(k)&&m.role==='lider');
+const memberRoleForArea = (m, areaKey) => m.areaRoles?.[areaKey] || m.area_roles?.[areaKey] || m.role || 'voluntario';
+const AL    = k => members.find(m=>(Array.isArray(m.areas)?m.areas:m.area?[m.area]:[]).includes(k)&&memberRoleForArea(m,k)==='lider');
 const MONTHS= ['jan','fev','mar','abr','mai','jun','jul','ago','set','out','nov','dez'];
 const fmt   = d => { if(!d)return'—'; const[y,mo,dy]=d.split('-'); return`${dy}/${mo}/${y}`; };
 
@@ -2412,8 +2416,8 @@ async function removeEvVol(sessionId, areaKey, memberId) {
 function renderAreas(){
   document.getElementById('ar-body').innerHTML=AREAS.map(a=>{
     const am=members.filter(m=>(Array.isArray(m.areas)?m.areas:m.area?[m.area]:[]).includes(a.key));
-    const ldr=am.find(m=>m.role==='lider');
-    const vols=am.filter(m=>m.role!=='lider');
+    const ldr=am.find(m=>memberRoleForArea(m,a.key)==='lider');
+    const vols=am.filter(m=>memberRoleForArea(m,a.key)!=='lider');
     const aColor=a.color.replace('var(--','').replace(')','');
     return`<div>
       <div class="area-hd" onclick="toggleAr('${a.key}')">
@@ -2502,8 +2506,8 @@ function expandMinistry(areaKey) {
     const mA = Array.isArray(m.areas) ? m.areas : m.area ? [m.area] : [];
     return mA.includes(areaKey);
   });
-  const leader = aMembers.find(m => m.role === 'lider');
-  const vols   = aMembers.filter(m => m.role !== 'lider');
+  const leader = aMembers.find(m => memberRoleForArea(m, areaKey) === 'lider');
+  const vols   = aMembers.filter(m => memberRoleForArea(m, areaKey) !== 'lider');
 
   let html = '';
   if (leader) {
@@ -2595,14 +2599,15 @@ async function saveMember(){
   const phone=document.getElementById('mem-phone').value.trim();
   const role=document.getElementById('mem-role').value;
   const areas=getMemChk();
+  const areaRoles=Object.fromEntries(areas.map(k => [k, role]));
   if(!name){toast('Informe o nome');return;}
   if(!areas.length){toast('Selecione ao menos uma área');return;}
   if(editMemId){
     const i=members.findIndex(m=>m.id===editMemId);
-    members[i]={...members[i],name,email,phone,role,areas};
+    members[i]={...members[i],name,email,phone,role,areas,areaRoles};
     toast('Atualizado');
   }else{
-    members.push({id:uid(),name,email,phone,role,areas});
+    members.push({id:uid(),name,email,phone,role,areas,areaRoles});
     toast('Adicionado');
   }
   saveData();closeMemModal();renderAreas();
@@ -3023,6 +3028,7 @@ async function doSignup() {
   const btn = document.querySelector('#auth-signup-form .auth-btn');
   if(btn) { btn.textContent = 'Criando conta…'; btn.disabled = true; }
   document.getElementById('auth-error').classList.remove('show', 'success');
+  _signupInProgress = true;
 
   try {
     // 1. Criar usuário no Supabase Auth
@@ -3059,22 +3065,25 @@ async function doSignup() {
     // 3. Salvar membro na tabela members
     const { error: memberError } = await withJwtClockRetry(() =>
       sb.from('members').upsert(
-        { id: userId, name, email, phone: whatsapp, areas, role },
+        { id: userId, name, email, phone: whatsapp, areas, role, area_roles: areaRoles },
         { onConflict: 'id' }
       )
     );
     if (memberError) throw memberError;
 
-    // 4. O onAuthStateChange vai detectar o SIGNED_IN e chamar enterApp()
+    // 4. Só abre o aplicativo depois que perfil e áreas estiverem salvos.
+    await enterApp(authData.user);
   } catch(e) {
     showAuthError('Erro ao criar conta: ' + e.message);
   } finally {
+    _signupInProgress = false;
     if(btn) { btn.textContent = 'Criar conta'; btn.disabled = false; }
   }
 }
 
 // Dados do signup ficam aqui para serem usados pelo enterApp antes do banco propagar
 let _pendingSignupData = null;
+let _signupInProgress = false;
 
 function selectRole(val) {
   document.getElementById('role-opt-voluntario').classList.toggle('selected', val === 'voluntario');
@@ -3214,7 +3223,11 @@ async function dbLoadAll() {
   if(evRes.error)  { console.error('Erro eventos:', evRes.error);  throw evRes.error; }
   if(memRes.error) { console.error('Erro members:', memRes.error); throw memRes.error; }
   events  = (evRes.data  || []).map(r => ({ ...r, areas: r.areas||[], sessions: r.sessions||[] }));
-  members = (memRes.data || []).map(r => ({ ...r, areas: r.areas||[] }));
+  members = (memRes.data || []).map(r => ({
+    ...r,
+    areas: r.areas || [],
+    areaRoles: r.area_roles || Object.fromEntries((r.areas || []).map(k => [k, r.role || 'voluntario']))
+  }));
 }
 
 async function dbSaveEvent(ev) {
@@ -3231,7 +3244,8 @@ async function dbDeleteEvent(id) {
 
 async function dbSaveMember(m) {
   const row = { id: m.id, name: m.name, email: m.email||'', phone: m.phone||'',
-    areas: m.areas, role: m.role };
+    areas: m.areas, role: m.role,
+    area_roles: m.areaRoles || Object.fromEntries((m.areas || []).map(k => [k, m.role || 'voluntario'])) };
   const { error } = await sb.from('members').upsert(row, { onConflict: 'id' });
   if (error) { console.error('Erro dbSaveMember:', error); toast('Erro ao salvar no servidor'); }
 }
@@ -3345,7 +3359,8 @@ async function enterApp(supaUser) {
             email: newProfile.email,
             phone: newProfile.whatsapp,
             areas: metaAreas,
-            role: metaRole
+            role: metaRole,
+            area_roles: areaRoles
           }, { onConflict: 'id' })
         );
         if (memberError) throw memberError;
@@ -3410,6 +3425,7 @@ async function initApp() {
   // Continua escutando mudanças (login/logout em tempo real)
   sb.auth.onAuthStateChange((event, session) => {
     if (event === 'SIGNED_IN' && session?.user) {
+      if (_signupInProgress) return;
       authScreen.style.display = 'none';
       // Executa fora do callback do Auth para não bloquear signIn/signUp.
       setTimeout(() => enterApp(session.user).catch(console.error), 0);

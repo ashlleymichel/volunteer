@@ -21,8 +21,12 @@ create table if not exists public.members (
   email   text default '',
   phone   text default '',
   areas   jsonb default '[]'::jsonb,  -- ["audio", "projecao"]
-  role    text not null default 'voluntario'
+  role    text not null default 'voluntario',
+  area_roles jsonb default '{}'::jsonb -- { "audio": "lider", "projecao": "voluntario" }
 );
+
+-- Migração para projetos criados com uma versão anterior do schema
+alter table public.members add column if not exists area_roles jsonb default '{}'::jsonb;
 
 -- ── EVENTS (eventos com sessões) ─────────────
 create table if not exists public.events (
