@@ -1880,6 +1880,7 @@ function setTab(tab, el) {
   if(tab==='inicio') renderInicio();
   if(tab==='areas')       renderAreas();
   if(tab==='voluntarios') renderVols();
+  if(tab==='eventos' && !googleEvents.length) loadGoogleCalendarEvents();
   if(tab==='perfil')      renderProfileView();
   if(tab==='calendario') {
     renderCalendar();
@@ -2036,7 +2037,7 @@ function renderProfileHighlight() {
 /* ── EVENTS ── */
 function filterEvents() {
   const q = evSearchQuery.toLowerCase();
-  return events.filter(ev => {
+  return visibleEvents().filter(ev => {
     const textMatch = !q ||
       ev.name.toLowerCase().includes(q) ||
       (ev.leader||'').toLowerCase().includes(q) ||
@@ -2097,7 +2098,8 @@ function renderEvents() {
   const filtered = filterEvents();
 
   if (!filtered.length) {
-    b.innerHTML = `<div class="empty-msg"><div class="empty-icon">${events.length ? '🔍' : '📭'}</div>${events.length ? 'Nenhum evento encontrado' : 'Nenhum evento ainda'}</div>`;
+    const hasEvents = visibleEvents().length > 0;
+    b.innerHTML = `<div class="empty-msg"><div class="empty-icon">${hasEvents ? '🔍' : '📭'}</div>${hasEvents ? 'Nenhum evento encontrado' : 'Nenhum evento ainda'}</div>`;
     return;
   }
 
@@ -2105,7 +2107,7 @@ function renderEvents() {
   b.innerHTML = sorted.map(ev=>{
     let day='—',mon='';
     if(ev.date){ const[,mo,dy]=ev.date.split('-'); day=dy.replace(/^0/,''); mon=MONTHS[parseInt(mo,10)-1]||''; }
-    return `<div class="ev-row" onclick="openDrawer('${ev.id}')">
+    return `<div class="ev-row" onclick="openEventDetails('${ev.id}')">
       <div class="ev-date-block">
         <div class="ev-date-day">${day}</div>
         ${mon?`<div class="ev-date-mon">${mon}</div>`:''}
@@ -2116,7 +2118,7 @@ function renderEvents() {
       </div>
       <div class="ev-right">
         <div class="ev-areas-dots">${ev.areas.map(k=>`<span style="width:7px;height:7px;border-radius:50%;background:${A(k)?.color};display:inline-block"></span>`).join('')}</div>
-        ${isLeader() ? `<div class="ev-actions" onclick="stopEv(event)">
+        ${isLeader() && !isGoogleEvent(ev) ? `<div class="ev-actions" onclick="stopEv(event)">
           <button class="btn btn-ghost btn-sm" onclick="openEditEv('${ev.id}')">Editar</button>
           <button class="btn btn-danger btn-sm" onclick="delEvent('${ev.id}')">Excluir</button>
         </div>` : ''}
@@ -2258,7 +2260,14 @@ ${isLeader() ? `<button class="btn-link" style="color:var(--danger)" onclick="re
             <span class="darea-cnt">${assigned.length}</span>
           </div>
           ${isLeader()
-              ? `<button class="darea-add-btn" onclick="openEvVolModal('${sess.id}','${k}')">+ Adicionar</button>`
+              ? `<div style="display:flex;align-items:center;gap:8px">
+                  ${canSelfJoin(k)
+                    ? isSelfInSession(sess, k)
+                      ? `<button class="darea-add-btn" style="color:var(--danger)" onclick="selfRemoveFromEvent('${sess.id}','${k}')">− Sair</button>`
+                      : `<button class="darea-add-btn" onclick="selfAddToEvent('${sess.id}','${k}')">+ Me voluntariar</button>`
+                    : ''}
+                  <button class="darea-add-btn" onclick="openEvVolModal('${sess.id}','${k}')">+ Adicionar</button>
+                </div>`
               : isSelfInSession(sess, k)
                 ? `<button class="darea-add-btn" style="color:var(--danger)" onclick="selfRemoveFromEvent('${sess.id}','${k}')">− Sair desta sessão</button>`
                 : canSelfJoin(k)
@@ -2313,7 +2322,7 @@ function openDrawer(id) {
 
   // Ações de líder
   const actEl = document.getElementById('evd-actions');
-  if (isLeader()) {
+  if (isLeader() && !isGoogleEvent(ev)) {
     actEl.style.display = '';
     actEl.innerHTML = `
       <button class="btn btn-ghost btn-sm" onclick="editFromDrawer()">✎ Editar evento</button>
@@ -2332,6 +2341,54 @@ function openDrawer(id) {
   document.getElementById('btn-ev').style.display  = 'none';
   document.getElementById('btn-vol').style.display = 'none';
   window.scrollTo(0, 0);
+}
+
+function isGoogleEvent(ev) {
+  return ev?.source === 'google' || String(ev?.id || '').startsWith('google-');
+}
+
+function visibleEvents() {
+  const today = new Date();
+  const todayStr = `${today.getFullYear()}-${String(today.getMonth()+1).padStart(2,'0')}-${String(today.getDate()).padStart(2,'0')}`;
+  const upcomingGoogleEvents = googleEvents.filter(ev => ev.date >= todayStr);
+  const syncedGoogleIds = new Set(upcomingGoogleEvents.map(ev => ev.id));
+  const regularEvents = events.filter(ev => !isGoogleEvent(ev));
+  const syncedGoogleEvents = upcomingGoogleEvents.map(googleEvent => {
+    const saved = events.find(ev => ev.id === googleEvent.id);
+    return saved
+      ? { ...googleEvent, areas: saved.areas || [], sessions: saved.sessions || [], source: 'google' }
+      : { ...googleEvent, areas: AREAS.map(area => area.key), source: 'google' };
+  });
+  return [...regularEvents, ...syncedGoogleEvents].filter(ev => !isGoogleEvent(ev) || syncedGoogleIds.has(ev.id));
+}
+
+async function openEventDetails(id) {
+  let event = events.find(ev => ev.id === id);
+  const googleEvent = googleEvents.find(ev => ev.id === id);
+  if (event && googleEvent) {
+    event = {
+      ...event,
+      ...googleEvent,
+      areas: event.areas?.length ? event.areas : AREAS.map(area => area.key),
+      sessions: event.sessions?.length ? event.sessions : [{ id: 'main', time: googleEvent.time || '', volunteers: {} }],
+      source: 'google'
+    };
+    const index = events.findIndex(ev => ev.id === id);
+    events[index] = event;
+  }
+  if (!event) {
+    if (!googleEvent) return;
+    event = {
+      ...googleEvent,
+      areas: AREAS.map(area => area.key),
+      sessions: [{ id: 'main', time: googleEvent.time || '', volunteers: {} }],
+      leader: 'Paz Barueri',
+      source: 'google'
+    };
+    events.push(event);
+    await dbSaveEvent(event);
+  }
+  openDrawer(id);
 }
 
 let _drawerFromTab = 'eventos';
@@ -2747,6 +2804,9 @@ async function loadGoogleCalendarEvents(force = false) {
     googleEvents = Array.isArray(data.events) ? data.events : [];
     if (document.getElementById('view-calendario')?.classList.contains('active')) {
       renderCalendar();
+    }
+    if (document.getElementById('view-eventos')?.classList.contains('active')) {
+      renderEvents();
     }
   } catch (error) {
     console.error('Erro ao sincronizar Google Calendar:', error);
