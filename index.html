@@ -1252,6 +1252,11 @@
     border: 1px solid rgba(255,59,48,.2);
   }
   .auth-error.show { display: block; animation: fadeUp .2s ease; }
+  .auth-error.success {
+    color: #248a3d;
+    background: rgba(52,199,89,.1);
+    border-color: rgba(52,199,89,.25);
+  }
 
   .auth-sep {
     display: flex; align-items: center; gap: 12px;
@@ -2885,7 +2890,15 @@ function showSignup() {
 
 function showAuthError(msg) {
   const el = document.getElementById('auth-error');
-  el.textContent = msg; el.classList.add('show');
+  el.textContent = msg;
+  el.classList.remove('success');
+  el.classList.add('show');
+}
+
+function showAuthSuccess(msg) {
+  const el = document.getElementById('auth-error');
+  el.textContent = msg;
+  el.classList.add('show', 'success');
 }
 
 async function doLogin() {
@@ -2919,40 +2932,51 @@ async function doSignup() {
   if (!areas.length)       { showAuthError('Selecione ao menos uma área.'); return; }
 
   const btn = document.querySelector('#auth-signup-form .auth-btn');
-  if(btn) btn.textContent = 'Criando conta…';
+  if(btn) { btn.textContent = 'Criando conta…'; btn.disabled = true; }
+  document.getElementById('auth-error').classList.remove('show', 'success');
 
   try {
     // 1. Criar usuário no Supabase Auth
     const { data: authData, error: authError } = await sb.auth.signUp({
       email,
       password,
-      options: { data: { name, role } }
+      options: { data: { name, role, whatsapp, areas } }
     });
     if (authError) { showAuthError(authError.message); return; }
+    if (!authData.user) { showAuthError('Não foi possível criar a conta. Tente novamente.'); return; }
 
     const userId = authData.user.id;
     const areaRoles = Object.fromEntries(areas.map(k => [k, role]));
 
+    // Com confirmação de e-mail ativa não há sessão autenticada ainda.
+    // Os dados adicionais ficam nos metadados e serão gravados após o primeiro login.
+    if (!authData.session) {
+      document.getElementById('su-password').value = '';
+      showAuthSuccess('Conta criada! Verifique seu e-mail para confirmar o cadastro e depois faça login.');
+      return;
+    }
+
+    // Deixa os dados disponíveis antes que o evento SIGNED_IN seja processado.
+    _pendingSignupData = { userId, name, email, whatsapp, role, areaRoles, areas };
+
     // 2. Salvar perfil na tabela profiles
-    await sb.from('profiles').upsert({
+    const { error: profileError } = await sb.from('profiles').upsert({
       user_id: userId, name, email, whatsapp, role, area_roles: areaRoles
     }, { onConflict: 'user_id' });
+    if (profileError) throw profileError;
 
     // 3. Salvar membro na tabela members
-    await sb.from('members').upsert(
+    const { error: memberError } = await sb.from('members').upsert(
       { id: userId, name, email, phone: whatsapp, areas, role },
       { onConflict: 'id' }
     );
+    if (memberError) throw memberError;
 
-    // 4. Pré-preenche currentUser e profile com os dados do formulário
-    //    para que enterApp() não precise esperar o banco propagar
-    _pendingSignupData = { userId, name, email, whatsapp, role, areaRoles, areas };
-
-    // 5. O onAuthStateChange vai detectar o SIGNED_IN e chamar enterApp()
+    // 4. O onAuthStateChange vai detectar o SIGNED_IN e chamar enterApp()
   } catch(e) {
     showAuthError('Erro ao criar conta: ' + e.message);
   } finally {
-    if(btn) btn.textContent = 'Criar conta';
+    if(btn) { btn.textContent = 'Criar conta'; btn.disabled = false; }
   }
 }
 
@@ -3201,9 +3225,39 @@ async function enterApp(supaUser) {
           role:      prof.role || 'voluntario'
         };
       } else {
-        // Perfil não encontrado — usa email como fallback temporário
-        currentUser = { id: supaUser.id, email: supaUser.email, role: 'voluntario', name: '' };
-        profile = null;
+        // Primeiro login após confirmar o e-mail: cria o perfil usando os
+        // metadados armazenados durante o cadastro.
+        const meta = supaUser.user_metadata || {};
+        const metaAreas = Array.isArray(meta.areas) ? meta.areas : [];
+        const metaRole = meta.role || 'voluntario';
+        const areaRoles = Object.fromEntries(metaAreas.map(k => [k, metaRole]));
+        const newProfile = {
+          user_id: supaUser.id,
+          name: meta.name || '',
+          email: supaUser.email || '',
+          whatsapp: meta.whatsapp || '',
+          role: metaRole,
+          area_roles: areaRoles
+        };
+        const { error: profileError } = await sb.from('profiles').upsert(newProfile, { onConflict: 'user_id' });
+        if (profileError) throw profileError;
+        const { error: memberError } = await sb.from('members').upsert({
+          id: supaUser.id,
+          name: newProfile.name,
+          email: newProfile.email,
+          phone: newProfile.whatsapp,
+          areas: metaAreas,
+          role: metaRole
+        }, { onConflict: 'id' });
+        if (memberError) throw memberError;
+        currentUser = {
+          id: supaUser.id, email: newProfile.email, name: newProfile.name,
+          role: metaRole, whatsapp: newProfile.whatsapp, areaRoles
+        };
+        profile = {
+          name: newProfile.name, email: newProfile.email,
+          whatsapp: newProfile.whatsapp, areaRoles, role: metaRole
+        };
       }
     }
     await dbLoadAll();
@@ -3255,10 +3309,11 @@ async function initApp() {
   }
 
   // Continua escutando mudanças (login/logout em tempo real)
-  sb.auth.onAuthStateChange(async (event, session) => {
+  sb.auth.onAuthStateChange((event, session) => {
     if (event === 'SIGNED_IN' && session?.user) {
       authScreen.style.display = 'none';
-      await enterApp(session.user);
+      // Executa fora do callback do Auth para não bloquear signIn/signUp.
+      setTimeout(() => enterApp(session.user).catch(console.error), 0);
     } else if (event === 'SIGNED_OUT') {
       // Token expirou ou signOut externo — mostra login
       currentUser = null; profile = null; events = []; members = [];
